@@ -26,7 +26,7 @@ private:
     void start_accept()
     {
         Session *new_session = new Session(io_service_,
-            [this, new_session]() -> bool {
+            [this](Session *new_session) -> bool {
                 if (sessions_.size() >= num_players_)
                     return false;
 

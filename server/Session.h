@@ -11,7 +11,7 @@ using boost::asio::ip::tcp;
 
 class Session {
 public:
-    Session(boost::asio::io_service &io_service, std::function<bool()> login_callback)
+    Session(boost::asio::io_service &io_service, std::function<bool(Session *)> login_callback)
         : io_service_(io_service),
           socket_(io_service),
           login_callback_(login_callback)
@@ -40,7 +40,7 @@ private:
             if (login == "login")
             {
                 login_name_ = name;
-                if (login_callback_())
+                if (login_callback_(this))
                 {
                     std::cout << "login " << name << "\n";
                 }
@@ -65,7 +65,7 @@ private:
 
     boost::asio::io_service &io_service_;
     tcp::socket socket_;
-    std::function<bool()> login_callback_;
+    std::function<bool(Session *)> login_callback_;
     boost::asio::streambuf login_buf_;
     std::string login_name_;
 };
