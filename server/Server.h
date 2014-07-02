@@ -13,7 +13,7 @@ using boost::asio::ip::tcp;
 
 class Server {
 public:
-    Server(boost::asio::io_service &io_service, const int port, const int num_players, const int initial_chips)
+    Server(boost::asio::io_service &io_service, const unsigned port, const unsigned num_players, const unsigned initial_chips)
         : io_service_(io_service),
           acceptor_(io_service, tcp::endpoint(tcp::v4(), port)),
           num_players_(num_players),
@@ -70,8 +70,8 @@ private:
 
     boost::asio::io_service &io_service_;
     tcp::acceptor acceptor_;
-    const int num_players_;
-    const int initial_chips_;
+    const unsigned num_players_;
+    const unsigned initial_chips_;
     std::vector<std::unique_ptr<Session>> sessions_;
 };
 
