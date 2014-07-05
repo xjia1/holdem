@@ -14,8 +14,8 @@ public:
         static unsigned seed = std::chrono::system_clock::now().time_since_epoch().count();
         static std::default_random_engine generator(seed);
 
-        for (char suit : "CDHS")
-        for (char rank : "23456789TJQKA")
+        for (char suit : std::string("CDHS"))
+        for (char rank : std::string("23456789TJQKA"))
         {
             Card card;
             card.rank = rank;

@@ -19,6 +19,7 @@ public:
         : io(io), names(names), chips(chips), blind(blind), n(chips.size()), dealer(0), hole_cards(n)
     {
         reset_current_state();
+        dev_null = fopen("/dev/null", "w");
     }
 
     void run()
@@ -117,7 +118,7 @@ private:
 
         std::string message;
         receive(player, message);
-        std::istringstream iss;
+        std::istringstream iss(message);
 
         std::string action_name;
         iss >> action_name;
@@ -137,6 +138,7 @@ private:
         }
         else
         {
+            std::cerr << "unknown action " << action_name << "\n";
             return -1;
         }
     }
@@ -145,7 +147,7 @@ private:
     {
         if (chips[player] < amount)
         {
-            // illegal bet: insufficient chips
+            std::cerr << "illegal bet: insufficient chips\n";
             fold(player);
         }
         else
@@ -155,12 +157,12 @@ private:
 
             if (chips[player] > amount && expected_bet < previous_bet)
             {
-                // illegal bet: have sufficient chips but didn't bet as much as the previous player
+                std::cerr << "illegal bet: have sufficient chips but didn't bet as much as the previous player\n";
                 fold(player);
             }
             else if (chips[player] > amount && expected_bet > previous_bet && expected_bet - previous_bet < blind)
             {
-                // illegal bet: have sufficient chips but didn't raise as much as the blind
+                std::cerr << "illegal bet: have sufficient chips but didn't raise as much as the blind\n";
                 fold(player);
             }
             else
@@ -192,6 +194,8 @@ private:
 
     void reset_current_state()
     {
+        current_bets.resize(n);
+        current_actions.resize(n);
         for (int player = 0; player < n; player++)
         {
             current_bets[player] = 0;
@@ -212,7 +216,7 @@ private:
         va_list args, args1;
         va_start(args, format);
         va_copy(args1, args);
-        int buflen = vprintf(format, args);
+        int buflen = vfprintf(dev_null, format, args);
         char *buf = new char[buflen + 1];
         vsprintf(buf, format, args1);
         std::string message(buf);
@@ -227,7 +231,7 @@ private:
         va_list args, args1;
         va_start(args, format);
         va_copy(args1, args);
-        int buflen = vprintf(format, args);
+        int buflen = vfprintf(dev_null, format, args);
         char *buf = new char[buflen + 1];
         vsprintf(buf, format, args1);
         std::string message(buf);
@@ -377,6 +381,7 @@ private:
     std::vector<Pot> pots;
     std::vector<int> current_bets;
     std::vector<std::vector<Action>> current_actions;
+    FILE *dev_null;
 };
 
 }

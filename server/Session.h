@@ -8,10 +8,7 @@
 
 namespace holdem {
 
-using boost::asio::deadline_timer;
 using boost::asio::ip::tcp;
-using boost::optional;
-using boost::system::error_code;
 
 class Session {
 public:
@@ -45,41 +42,13 @@ public:
 
     void receive(std::string &message)
     {
-        optional<error_code> timer_result;
-        deadline_timer timer(io_service_);
-        timer.expires_from_now(boost::posix_time::seconds(5));
-        timer.async_wait(boost::bind(set_result, &timer_result, _1));
-
-        optional<error_code> read_result;
         boost::asio::streambuf buf;
-        boost::asio::async_read_until(socket_, buf, '\n', boost::bind(set_result, &read_result, _1));
-
-        io_service_.reset();
-        while (io_service_.run_one())
-        {
-            if (read_result)
-                timer.cancel();
-            else if (timer_result)
-                socket_.cancel();
-        }
-
-        if (read_result && !*read_result)
-        {
-            std::istream is(&buf);
-            std::getline(is, message);
-        }
-        else
-        {
-            message = "";
-        }
+        boost::asio::read_until(socket_, buf, '\n');
+        std::istream is(&buf);
+        std::getline(is, message);
     }
 
 private:
-    static void set_result(optional<error_code> *a, error_code b)
-    {
-        a->reset(b);
-    }
-
     void handle_login(const boost::system::error_code &error)
     {
         if (!error)
