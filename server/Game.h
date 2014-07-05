@@ -19,7 +19,6 @@ public:
         : io(io), names(names), chips(chips), blind(blind), n(chips.size()), dealer(0), hole_cards(n)
     {
         reset_current_state();
-        dev_null = fopen("/dev/null", "w");
     }
 
     void run()
@@ -213,32 +212,22 @@ private:
 
     void broadcast(const char *format, ...)
     {
-        va_list args, args1;
+        char buffer[4096];
+        va_list args;
         va_start(args, format);
-        va_copy(args1, args);
-        int buflen = vfprintf(dev_null, format, args);
-        char *buf = new char[buflen + 1];
-        vsprintf(buf, format, args1);
-        std::string message(buf);
-        io.broadcast(message);
-        va_end(args1);
+        vsnprintf(buffer, 4096, format, args);
+        io.broadcast(std::string(buffer));
         va_end(args);
-        delete[] buf;
     }
 
     void send(int player, const char *format, ...)
     {
-        va_list args, args1;
+        char buffer[4096];
+        va_list args;
         va_start(args, format);
-        va_copy(args1, args);
-        int buflen = vfprintf(dev_null, format, args);
-        char *buf = new char[buflen + 1];
-        vsprintf(buf, format, args1);
-        std::string message(buf);
-        io.send(player, message);
-        va_end(args1);
+        vsnprintf(buffer, 4096, format, args);
+        io.send(player, std::string(buffer));
         va_end(args);
-        delete[] buf;
     }
 
     void receive(int player, std::string &message)
@@ -318,6 +307,8 @@ private:
         if (is_pre_flop_round())
             from = 3, to = n + 2;
 
+        // FIXME XXX BUG 如果已经fold不能再action
+
         if (no_current_actions())
         {
             for (int i = from; i <= to; i++)
@@ -381,7 +372,6 @@ private:
     std::vector<Pot> pots;
     std::vector<int> current_bets;
     std::vector<std::vector<Action>> current_actions;
-    FILE *dev_null;
 };
 
 }
