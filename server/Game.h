@@ -209,26 +209,32 @@ private:
 
     void broadcast(const char *format, ...)
     {
-        va_list args;
+        va_list args, args1;
         va_start(args, format);
+        va_copy(args1, args);
         int buflen = vprintf(format, args);
         char *buf = new char[buflen + 1];
-        vsprintf(buf, format, args);
+        vsprintf(buf, format, args1);
         std::string message(buf);
         io.broadcast(message);
+        va_end(args1);
         va_end(args);
+        delete[] buf;
     }
 
     void send(int player, const char *format, ...)
     {
-        va_list args;
+        va_list args, args1;
         va_start(args, format);
+        va_copy(args1, args);
         int buflen = vprintf(format, args);
         char *buf = new char[buflen + 1];
-        vsprintf(buf, format, args);
+        vsprintf(buf, format, args1);
         std::string message(buf);
         io.send(player, message);
+        va_end(args1);
         va_end(args);
+        delete[] buf;
     }
 
     void receive(int player, std::string &message)
