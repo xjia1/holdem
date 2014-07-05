@@ -1,7 +1,7 @@
 TARGET = server
 LIBS = -lc++ -lboost_system
 CXX = clang++
-CFLAGS = -std=c++11 -stdlib=libc++ -Wall -Wextra -g -O3
+CFLAGS = -std=c++11 -stdlib=libc++ -Wall -Wextra -g
 
 .PHONY: default all clean
 
