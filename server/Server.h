@@ -35,7 +35,7 @@ public:
 
     void send(int i, const std::string &message) override
     {
-        sessions_[i]->send(message);
+        sessions_[i]->send(message + "\n");
     }
 
     void receive(int i, std::string &message) override
