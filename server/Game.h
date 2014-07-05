@@ -16,7 +16,7 @@ namespace holdem {
 class Game {
 public:
     Game(IO &io, const std::vector<std::string> &names, std::vector<int> &chips, int blind)
-        : io(io), names(names), chips(chips), blind(blind), n(chips.size()), dealer(0), hole_cards(n)
+        : io(io), names(names), chips(chips), blind(blind), n(chips.size()), dealer(0), hole_cards(n), folded(n, false)
     {
         reset_current_state();
     }
@@ -84,6 +84,8 @@ private:
     // return true if game continues
     bool bet_loop()
     {
+        std::cerr << ">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>\n";
+
         broadcast("round starts");
 
         for (int i = 0; i < n; i++)
@@ -171,7 +173,11 @@ private:
                 current_actions[player].emplace_back(Action::BET);
                 // TODO contribute to pots
 
-                broadcast("player %s bets %d", name_of(player), amount);
+                if (amount == 0)
+                    broadcast("player %s checks", name_of(player));
+                else
+                    broadcast("player %s bets %d", name_of(player), amount);
+
                 broadcast("player %s total bet is %d", name_of(player), current_bets[player]);
             }
         }
@@ -180,15 +186,8 @@ private:
     void fold(int player)
     {
         current_actions[player].emplace_back(Action::FOLD);
+        folded[player] = true;
         broadcast("player %s folds", name_of(player));
-    }
-
-    bool folded(int player)
-    {
-        for (const Action &x : current_actions[player])
-            if (x == Action::FOLD)
-                return true;
-        return false;
     }
 
     void reset_current_state()
@@ -198,15 +197,7 @@ private:
         for (int player = 0; player < n; player++)
         {
             current_bets[player] = 0;
-            if (folded(player))
-            {
-                current_actions[player].clear();
-                current_actions[player].emplace_back(Action::FOLD);
-            }
-            else
-            {
-                current_actions[player].clear();
-            }
+            current_actions[player].clear();
         }
     }
 
@@ -265,12 +256,26 @@ private:
 
     bool is_round_finished()
     {
-        return all_except_one_fold() || (all_action_counts_are_equal() && all_bet_amounts_are_equal());
+        if (all_except_one_fold())
+        {
+            std::cerr << "all_except_one_fold\n";
+            return true;
+        }
+        if (all_action_counts_are_equal() && all_bet_amounts_are_equal())
+        {
+            std::cerr << "all_action_counts_are_equal() && all_bet_amounts_are_equal()\n";
+            return true;
+        }
+        return false;
     }
 
     bool all_except_one_fold()
     {
-        return previous_player(dealer) == previous_player(previous_player(dealer));
+        int cnt = 0;
+        for (int player = 0; player < n; player++)
+            if (folded[player])
+                cnt++;
+        return cnt == n-1;
     }
 
     bool all_action_counts_are_equal()
@@ -278,13 +283,15 @@ private:
         int cnt = -1;
         for (int player = 0; player < n; player++)
         {
-            if (folded(player)) continue;
+            if (folded[player])
+                continue;
             if (cnt == -1)
                 cnt = current_actions[player].size();
             else if (cnt != static_cast<int>(current_actions[player].size()))
                 return false;
         }
-        return true;
+        std::cerr << "all_action_counts_are_equal=" << cnt << "\n";
+        return cnt > 0;
     }
 
     bool all_bet_amounts_are_equal()
@@ -292,12 +299,14 @@ private:
         int amt = -1;
         for (int player = 0; player < n; player++)
         {
-            if (folded(player)) continue;
+            if (folded[player])
+                continue;
             if (amt == -1)
                 amt = current_bets[player];
             else if (amt != current_bets[player])
                 return false;
         }
+        std::cerr << "all_bet_amounts_are_equal=" << amt << "\n";
         return true;
     }
 
@@ -305,17 +314,27 @@ private:
     {
         int from = 1, to = n;
         if (is_pre_flop_round())
+        {
+            std::cerr << "is_pre_flop_round, from=3, to=" << n + 2 << "\n";
             from = 3, to = n + 2;
+        }
 
         // FIXME XXX BUG 如果已经fold不能再action
 
         if (no_current_actions())
         {
+            std::cerr << "no_current_actions\n";
             for (int i = from; i <= to; i++)
             {
                 int p = (dealer + i) % n;
-                if (!folded(p))
-                    return p;
+                std::cerr << "p=" << p << "\n";
+                if (folded[p])
+                {
+                    std::cerr << p << " already folded, continue\n";
+                    continue;
+                }
+                std::cerr << "return " << p << "\n";
+                return p;
             }
         }
         else
@@ -324,12 +343,22 @@ private:
             for (int i = from; i <= to; i++)
             {
                 int p = (dealer + i) % n;
-                if (folded(p))
+                std::cerr << "p=" << p << "\n";
+                if (folded[p])
+                {
+                    std::cerr << p << " already folded, continue\n";
                     continue;
+                }
                 if (current_actions[p].size() < current_actions[previous_player(p)].size())
+                {
+                    std::cerr << "return " << p << " because of fewer actions\n";
                     return p;
+                }
                 if (chips[p] > 0 && current_bets[p] < current_bets[previous_player(p)])
+                {
+                    std::cerr << "return " << p << " because of fewer bets\n";
                     return p;
+                }
             }
         }
 
@@ -339,8 +368,12 @@ private:
     bool no_current_actions()
     {
         for (int i = 0; i < n; i++)
+        {
+            if (folded[n])
+                continue;
             if (current_actions[i].size() > 0)
                 return false;
+        }
         return true;
     }
 
@@ -354,7 +387,8 @@ private:
         for (int i = 1; i < n; i++)
         {
             int p = (player - i + n) % n;
-            if (folded(p)) continue;
+            if (folded[p]) continue;
+            std::cerr << "previous_player(" << player << ")=" << p << "\n";
             return p;
         }
         assert(false);
@@ -372,6 +406,7 @@ private:
     std::vector<Pot> pots;
     std::vector<int> current_bets;
     std::vector<std::vector<Action>> current_actions;
+    std::vector<bool> folded;
 };
 
 }
