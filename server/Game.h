@@ -5,7 +5,6 @@
 #include <sstream>
 #include <string>
 #include <vector>
-#include "Action.h"
 #include "Card.h"
 #include "Deck.h"
 #include "IO.h"
@@ -16,9 +15,9 @@ namespace holdem {
 class Game {
 public:
     Game(IO &io, const std::vector<std::string> &names, std::vector<int> &chips, int blind)
-        : io(io), names(names), chips(chips), blind(blind), n(chips.size()), dealer(0), hole_cards(n), folded(n, false)
+        : io(io), names(names), chips(chips), blind(blind), n(chips.size()), dealer(0), hole_cards(n), actioned(n, false), checked(n, false), folded(n, false)
     {
-        reset_current_state();
+        reset_current_bets();
     }
 
     void run()
@@ -91,14 +90,60 @@ private:
         for (int i = 0; i < n; i++)
             broadcast("player %s has %d chips", name_of(i), chips[i]);
 
-        while (!is_round_finished())
+        // 从庄家下一个人开始说话
+        int start_player = (dealer + 1) % n;
+        if (is_pre_flop_round())
+            // 第一轮下注有大小盲，从大盲下一个人开始说话
+            start_player = (dealer + 3) % n;
+
+        // 上一个raise的玩家，不算大小盲
+        last_raiser = -1;
+
+        for (int player = 0; player < n; player++)
+            actioned[player] = checked[player] = false;
+
+        // 下注结束条件：
+        // 0. 不考虑已经fold的人
+        // 1. 每个人都说过话
+        // 2. 所有人下注相同，或者all-in
+        // 3. 不能再raise了
+
+        int current_player = start_player;
+        for (;;)
         {
-            int player = current_player();
-            int amount = get_bet_from(player);
+            if (folded[current_player])
+            {
+                current_player = (current_player + 1) % n;
+                continue;
+            }
+
+            std::cerr << "current player is " << name_of(current_player) << "\n";
+
+            int amount = get_bet_from(current_player);
             if (amount >= 0)
-                bet(player, amount);
+                bet(current_player, amount);
             else
-                fold(player);
+                fold(current_player);
+            actioned[current_player] = true;
+
+            if (all_except_one_fold())
+            {
+                std::cerr << "all_except_one_fold\n";
+                break;
+            }
+
+            if (all_players_checked())
+            {
+                std::cerr << "all_players_checked\n";
+                break;
+            }
+
+            do current_player = (current_player + 1) % n; while (folded[current_player]);
+
+            std::cerr << "next player is " << name_of(current_player) << "\n";
+
+            if (all_players_actioned() && all_bet_amounts_are_equal() && there_is_no_possible_raise(current_player))
+                break;
         }
 
         broadcast("round ends");
@@ -109,7 +154,27 @@ private:
             return false;
 
         // reset *after* the loop to keep blinds
-        reset_current_state();
+        reset_current_bets();
+        return true;
+    }
+
+    bool all_players_checked()
+    {
+        for (int player = 0; player < n; player++)
+        {
+            if (folded[player]) continue;
+            if (!checked[player]) return false;
+        }
+        return true;
+    }
+
+    bool all_players_actioned()
+    {
+        for (int player = 0; player < n; player++)
+        {
+            if (folded[player]) continue;
+            if (!actioned[player]) return false;
+        }
         return true;
     }
 
@@ -154,14 +219,14 @@ private:
         else
         {
             int previous_bet = current_bets[previous_player(player)];
-            int expected_bet = current_bets[player] + amount;
+            int actual_bet = current_bets[player] + amount;
 
-            if (chips[player] > amount && expected_bet < previous_bet)
+            if (chips[player] > amount && actual_bet < previous_bet)
             {
                 std::cerr << "illegal bet: have sufficient chips but didn't bet as much as the previous player\n";
                 fold(player);
             }
-            else if (chips[player] > amount && expected_bet > previous_bet && expected_bet - previous_bet < blind)
+            else if (chips[player] > amount && actual_bet > previous_bet && actual_bet - previous_bet < blind)
             {
                 std::cerr << "illegal bet: have sufficient chips but didn't raise as much as the blind\n";
                 fold(player);
@@ -170,13 +235,27 @@ private:
             {
                 chips[player] -= amount;
                 current_bets[player] += amount;
-                current_actions[player].emplace_back(Action::BET);
                 // TODO contribute to pots
 
+                if (amount > 0 && actual_bet == previous_bet)
+                {
+                    std::cerr << "player " << name_of(player) << " calls\n";
+                }
+                else if (amount > 0 && actual_bet > previous_bet)
+                {
+                    std::cerr << "player " << name_of(player) << " raises\n";
+                    last_raiser = player;
+                }
+
                 if (amount == 0)
+                {
+                    checked[player] = true;
                     broadcast("player %s checks", name_of(player));
+                }
                 else
+                {
                     broadcast("player %s bets %d", name_of(player), amount);
+                }
 
                 broadcast("player %s total bet is %d", name_of(player), current_bets[player]);
             }
@@ -185,20 +264,15 @@ private:
 
     void fold(int player)
     {
-        current_actions[player].emplace_back(Action::FOLD);
         folded[player] = true;
         broadcast("player %s folds", name_of(player));
     }
 
-    void reset_current_state()
+    void reset_current_bets()
     {
         current_bets.resize(n);
-        current_actions.resize(n);
         for (int player = 0; player < n; player++)
-        {
             current_bets[player] = 0;
-            current_actions[player].clear();
-        }
     }
 
     void broadcast(const char *format, ...)
@@ -254,46 +328,22 @@ private:
         broadcast("%s card %c %s", round_name, card.rank, suit_of(card));
     }
 
-    bool is_round_finished()
+    // 只有一个人没有fold
+    bool all_except_one_fold()
     {
-        if (all_except_one_fold())
-        {
-            std::cerr << "all_except_one_fold\n";
-            return true;
-        }
-        if (all_action_counts_are_equal() && all_bet_amounts_are_equal())
-        {
-            std::cerr << "all_action_counts_are_equal() && all_bet_amounts_are_equal()\n";
-            return true;
-        }
-        return false;
+        return num_folded() == n-1;
     }
 
-    bool all_except_one_fold()
+    int num_folded()
     {
         int cnt = 0;
         for (int player = 0; player < n; player++)
             if (folded[player])
                 cnt++;
-        return cnt == n-1;
+        return cnt;
     }
 
-    bool all_action_counts_are_equal()
-    {
-        int cnt = -1;
-        for (int player = 0; player < n; player++)
-        {
-            if (folded[player])
-                continue;
-            if (cnt == -1)
-                cnt = current_actions[player].size();
-            else if (cnt != static_cast<int>(current_actions[player].size()))
-                return false;
-        }
-        std::cerr << "all_action_counts_are_equal=" << cnt << "\n";
-        return cnt > 0;
-    }
-
+    // 所有人下注相同，或者已经all-in
     bool all_bet_amounts_are_equal()
     {
         int amt = -1;
@@ -301,80 +351,27 @@ private:
         {
             if (folded[player])
                 continue;
-            if (amt == -1)
+            else if (amt == -1)
+            {
                 amt = current_bets[player];
+                std::cerr << "set amt=" << amt << " by " << name_of(player) << "\n";
+            }
+            else if (chips[player] == 0)
+                continue;
             else if (amt != current_bets[player])
+            {
+                std::cerr << "return false because amt<>" << current_bets[player] << " by " << name_of(player) << "\n";
                 return false;
+            }
         }
         std::cerr << "all_bet_amounts_are_equal=" << amt << "\n";
         return true;
     }
 
-    int current_player()
+    bool there_is_no_possible_raise(int next_to_play)
     {
-        int from = 1, to = n;
-        if (is_pre_flop_round())
-        {
-            std::cerr << "is_pre_flop_round, from=3, to=" << n + 2 << "\n";
-            from = 3, to = n + 2;
-        }
-
-        // FIXME XXX BUG 如果已经fold不能再action
-
-        if (no_current_actions())
-        {
-            std::cerr << "no_current_actions\n";
-            for (int i = from; i <= to; i++)
-            {
-                int p = (dealer + i) % n;
-                std::cerr << "p=" << p << "\n";
-                if (folded[p])
-                {
-                    std::cerr << p << " already folded, continue\n";
-                    continue;
-                }
-                std::cerr << "return " << p << "\n";
-                return p;
-            }
-        }
-        else
-        {
-            // not folded, have fewer actions than previous player, or bets fewer than previous player
-            for (int i = from; i <= to; i++)
-            {
-                int p = (dealer + i) % n;
-                std::cerr << "p=" << p << "\n";
-                if (folded[p])
-                {
-                    std::cerr << p << " already folded, continue\n";
-                    continue;
-                }
-                if (current_actions[p].size() < current_actions[previous_player(p)].size())
-                {
-                    std::cerr << "return " << p << " because of fewer actions\n";
-                    return p;
-                }
-                if (chips[p] > 0 && current_bets[p] < current_bets[previous_player(p)])
-                {
-                    std::cerr << "return " << p << " because of fewer bets\n";
-                    return p;
-                }
-            }
-        }
-
-        assert(false);
-    }
-
-    bool no_current_actions()
-    {
-        for (int i = 0; i < n; i++)
-        {
-            if (folded[n])
-                continue;
-            if (current_actions[i].size() > 0)
-                return false;
-        }
-        return true;
+        // FIXME not sure about pre-flop round
+        return is_pre_flop_round() || last_raiser == next_to_play;
     }
 
     bool is_pre_flop_round()
@@ -382,13 +379,14 @@ private:
         return community_cards.size() == 0;
     }
 
+    // 找前一个还没fold的玩家
     int previous_player(int player)
     {
         for (int i = 1; i < n; i++)
         {
             int p = (player - i + n) % n;
             if (folded[p]) continue;
-            std::cerr << "previous_player(" << player << ")=" << p << "\n";
+            std::cerr << "previous player of " << name_of(player) << " is " << name_of(p) << "\n";
             return p;
         }
         assert(false);
@@ -405,8 +403,10 @@ private:
     std::vector<Card> community_cards;
     std::vector<Pot> pots;
     std::vector<int> current_bets;
-    std::vector<std::vector<Action>> current_actions;
+    std::vector<bool> actioned;
+    std::vector<bool> checked;
     std::vector<bool> folded;
+    int last_raiser;
 };
 
 }
