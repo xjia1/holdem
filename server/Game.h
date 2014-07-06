@@ -69,7 +69,7 @@ public:
 
                     if (bet_loop())
                     {
-                        // TODO showdown: receive player cards and compare
+                        showdown();
                         return;
                     }
                 }
@@ -80,6 +80,28 @@ public:
     }
 
 private:
+    void showdown()
+    {
+        std::vector<std::pair<std::array<Card, 5>, int>> hands(n);
+
+        for (int player = 0; player < n; player++)
+        {
+            if (folded[player])
+                continue;
+
+            send(player, "showdown");
+
+            for (int i = 0; i < 5; i++)
+                receive(player, hands[player].first[i]);
+
+            hands[player].second = player;
+        }
+
+        // TODO check validity of hands
+
+        // TODO compare and win pots
+    }
+
     // return true if game continues
     bool bet_loop()
     {
@@ -147,7 +169,32 @@ private:
         }
 
         broadcast("round ends");
-        // TODO print pots and contributions
+
+        // calculate pots and contributions from current_bets
+        while (!all_zero(current_bets))
+        {
+            int x = minimum_positive(current_bets);
+            Pot pot;
+            for (int player = 0; player < n; player++)
+            {
+                if (current_bets[player] >= x)
+                {
+                    current_bets[player] -= x;
+                    pot.add(x, player);
+                }
+            }
+            pots.emplace_back(pot);
+        }
+
+        // print pots and contributions
+        for (const Pot &pot : pots)
+        {
+            std::ostringstream oss;
+            for (int player : pot.contributors)
+                oss << " " << name_of(player);
+            std::string contributors = oss.str();
+            broadcast("pot has %d chips contributed by%s", pot.amount, contributors.c_str());
+        }
 
         // only one player left, do not deal more cards, and do not require showdown
         if (all_except_one_fold())
@@ -156,6 +203,25 @@ private:
         // reset *after* the loop to keep blinds
         reset_current_bets();
         return true;
+    }
+
+    template<class Container>
+    bool all_zero(const Container &v)
+    {
+        for (size_t i = 0; i < v.size(); i++)
+            if (v[i] != 0)
+                return false;
+        return true;
+    }
+
+    template<class Container>
+    int minimum_positive(const Container &v)
+    {
+        int result = 0;
+        for (size_t i = 0; i < v.size(); i++)
+            if (v[i] > 0 && (result == 0 || v[i] < result))
+                result = v[i];
+        return result;
     }
 
     bool all_players_checked()
@@ -235,7 +301,6 @@ private:
             {
                 chips[player] -= amount;
                 current_bets[player] += amount;
-                // TODO contribute to pots
 
                 if (amount > 0 && actual_bet == previous_bet)
                 {
@@ -298,6 +363,25 @@ private:
     void receive(int player, std::string &message)
     {
         io.receive(player, message);
+    }
+
+    void receive(int player, Card &card)
+    {
+        std::string message;
+        io.receive(player, message);
+        std::istringstream iss(message);
+        std::string suit;
+        iss >> card.rank >> suit;
+        if (suit == "club")
+            card.suit = 'C';
+        else if (suit == "diamond")
+            card.suit = 'D';
+        else if (suit == "heart")
+            card.suit = 'H';
+        else if (suit == "spade")
+            card.suit = 'S';
+        else
+            std::cerr << "invalid suit " << suit << "\n";
     }
 
     const char *name_of(int player)
