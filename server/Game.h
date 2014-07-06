@@ -190,10 +190,10 @@ private:
         for (const Pot &pot : pots)
         {
             std::ostringstream oss;
-            for (int player : pot.contributors)
+            for (int player : pot.contributors())
                 oss << " " << name_of(player);
             std::string contributors = oss.str();
-            broadcast("pot has %d chips contributed by%s", pot.amount, contributors.c_str());
+            broadcast("pot has %d chips contributed by%s", pot.amount(), contributors.c_str());
         }
 
         // only one player left, do not deal more cards, and do not require showdown
